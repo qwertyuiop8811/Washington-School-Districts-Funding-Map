@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Washington State Regionalization Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+        }
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            z-index: 1000;
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 350px;
+        }
+        #ui-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #ui-header h2 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+        #minimize-btn {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #666;
+            padding: 0 5px;
+            line-height: 1;
+        }
+        #minimize-btn:hover {
+            color: #000;
+        }
+        #ui-content {
+            margin-top: 10px;
+        }
+        .minimized #ui-content {
+            display: none;
+        }
+        #status-msg {
+            font-size: 13px;
+            color: #666;
+            margin: 0;
+        }
+        #status-msg.error {
+            color: #c0392b;
+        }
+        #status-msg.success {
+            color: #27ae60;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        .legend {
+            line-height: 18px;
+            color: #555;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .legend i {
+            width: 18px;
+            height: 18px;
+            float: left;
+            margin-right: 8px;
+            opacity: 0.8;
+        }
+        .district-label {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #111;
+            text-shadow: 1px 1px 2px #fff, -1px -1px 2px #fff, 1px -1px 2px #fff, -1px 1px 2px #fff, 0px 0px 4px #fff;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        .district-label div {
+            transform: translate(-50%, -50%);
+        }
+        .zoomed-in .custom-tooltip {
+            display: none !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+        }
+        .zoomed-in .district-label {
+            pointer-events: auto;
+            user-select: text;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            cursor: text;
+        }
+        #zoom-controls {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: white;
+            padding: 8px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 8px;
+        }
+        #zoom-controls button {
+            padding: 6px 12px;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            transition: all 0.2s;
+        }
+        #zoom-controls button:hover {
+            background: #f3f4f6;
+            border-color: #9ca3af;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-container">
+    <div id="ui-header">
+        <h2>Regionalization Factor Map</h2>
+        <button id="minimize-btn" title="Toggle Minimize">−</button>
+    </div>
+    <div id="ui-content">
+        <p id="status-msg">Loading Washington_School_Districts.geojson…</p>
+    </div>
+</div>
+
+<div id="zoom-controls">
+    <button onclick="zoomTo('whatcom')">Whatcom/Skagit</button>
+    <button onclick="zoomTo('kitsap')">Kitsap Peninsula</button>
+    <button onclick="zoomTo('clark')">Clark County</button>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // Initialize map focused on Western Washington
+    const map = L.map('map').setView([47.6, -122.3], 8);
+
+    // Add base tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20
+    }).addTo(map);
+
+    // Data extracted from the provided Regionalization Factor CSV (Full Data)
+    const rawCSV = `
+District Number,School District,Regionalization Factor,Parcel Count,Home District Median Taxable Value,Proximate District Median Taxable Value,Difference
+01122,Benge,1,14,43954,114108,70154
+22017,Almira,1,154,68601,115607,47006
+10050,Curlew,1,807,82188,116479,34291
+22200,Wilbur,1,559,106236,119126,12890
+24014,Nespelem,1,68,38462.5,124408.5,85946
+10309,Republic,1,1920,95140,126027,30887
+10003,Keller,1,108,83573.5,130963,47389.5
+01109,Washtucna,1,133,77037,130984,53947
+22073,Creston,1,942,183796.5,139773,-44023.5
+10065,Orient,1,480,119880,139843,19963
+13301,Grand Coulee Dam,1,1832,145700.5,140621,-5079.5
+33212,Kettle Falls,1,2241,153162,141671,-11491
+10070,Inchelium,1,471,62254,144928,82674
+33205,Evergreen (Stevens)  ,1,147,160679,145166,-15513
+33030,Onion Creek,1,136,87326,156011.5,68685.5
+33211,Northport,1,850,121027.5,156011.5,34984
+24410,Oroville,1,2284,134688,156852,22164
+24404,Tonasket,1,3090,96702,157073,60371
+38300,Colfax,1.04,1238,126158.5,158510,32351.5
+33202,Summit Valley,1,149,145970,160680,14710
+33115,Colville,1.04,4176,177909.5,160876.5,-17033
+24019,Omak,1,3722,165512.5,163671,-1841.5
+24105,Okanogan,1,1838,148327,166945,18618
+38126,LaCrosse,1,222,38863,169106,130243
+26070,Selkirk,1,1377,127737,172308.5,44571.5
+38301,Palouse,1,578,141765.5,176803,35037.5
+25101,Ocean Beach,1,11309,174490,181176.5,6686.5
+14028,Hoquiam,1,3577,142928,183232,40304
+38304,Steptoe,1.04,91,64492,183373,118881
+14064,North Beach,1,8918,238545,184004,-54541
+20403,Roosevelt,1,73,79336,185110.5,105774.5
+38302,Garfield,1,314,74785,186528.5,111743.5
+14005,Aberdeen,1,6383,169600,187152,17552
+14099,Cosmopolis,1,825,211095,187884.5,-23210.5
+33206,Columbia (Stevens)  ,1,317,107319,188233.5,80914.5
+14172,Ocosta,1,3895,150170,188336,38166
+38267,Pullman,1,4769,229484,188657,-40827
+25118,South Bend,1,1188,141725,189753,48028
+13167,Wilson Creek,1,181,64852,190077.5,125225.5
+22105,Odessa,1.04,457,88208,191545,103337
+01158,Lind,1,348,112804.5,192107.5,79303
+02420,Asotin-Anatone,1,1409,283037,194104,-88933
+14117,Wishkah Valley,1,332,255646.5,195379,-60267.5
+13146,Warden,1,1008,130318,196422,66104
+12110,Pomeroy,1,1197,80207,197774,117567
+13161,Moses Lake,1,13329,228547,198466,-30081
+26059,Cusick,1,1260,137069.5,198536.5,61467
+14077,Taholah,1,58,64260,199532,135272
+38306,Colton,1,364,164608,199674,35066
+25116,Raymond,1,1358,153942,202479,48537
+20203,Bickleton,1,394,128062.5,203797,75734.5
+24350,Methow Valley,1,4293,344528,204562,-139966
+02250,Clarkston,1,6425,208037,206165.5,-1871.5
+13156,Soap Lake,1,1367,134843,207780,72937
+33036,Chewelah,1,2173,172724,208689.5,35965.5
+38308,Endicott,1,199,59005,210946,151941
+14097,Lake Quinault,1,508,121299.5,212225,90925.5
+33070,Valley,1,677,110711,213636,102925
+39120,Mabton,1,751,181515,218878,37363
+07002,Dayton,1.04,1486,152644,223539,70895
+01160,Ritzville,1.04,761,156759,225372,68613
+09207,Mansfield,1,215,113970,226123,112153
+20404,Goldendale,1,2780,155405,226187,70782
+20215,Centerville,1,166,174831.5,228929,54097.5
+24111,Brewster,1,1205,162717,229276,66559
+25155,Naselle-Grays River Vly.,1,883,224425,231360,6935
+13151,Coulee-Hartline,1,961,110190,232432.5,122242.5
+07035,Starbuck,1,73,69352,234240.5,164888.5
+20402,Klickitat,1.04,308,92694.5,235063,142368.5
+20094,Wishram,1,184,90667.5,235229,144561.5
+25160,Willapa Valley,1,943,203812,235357.5,31545.5
+09075,Bridgeport,1,874,89890,237733,147843
+13165,Ephrata,1.04,3857,187324,243397,56073
+38322,St. John,1,377,89943,244762,154819
+38324,Oakesdale,1,322,96053.5,244908,148854.5
+16020,Queets-Clearwater,1.04,51,46594,246868,200274
+20401,Glenwood,1.04,149,151840,247973.5,96133.5
+20405,White Salmon Valley,1.04,3165,387172,247973.5,-139198.5
+20406,Lyle,1,1285,231245,247973.5,16728.5
+05402,Quillayute Valley,1,2491,154199,250109.5,95910.5
+35200,Wahkiakum,1.04,1425,285954,250566.5,-35387.5
+25200,North River  ,1,83,144723,251247,106524
+22204,Harrington,1.04,210,66080.5,251618,185537.5
+20400,Trout Lake,1,410,372252.5,252640,-119612.5
+38320,Rosalia,1.04,359,83227,252971.5,169744.5
+38265,Tekoa,1,340,69631.5,255753,186121.5
+22008,Sprague,1,248,58852,257882,199030
+05401,Cape Flattery,1,589,114215,259174,144959
+38264,Lamont,1,52,49673,263155.5,213482.5
+39202,Toppenish,1,2881,203117,264121,61004
+36401,Waitsburg,1,541,202898,265321,62423
+33207,Mary Walker,1,1017,93337,265864,172527
+39204,Granger,1,1280,203593,268768,65175
+32414,Deer Park,1,4170,252155.5,271292,19136.5
+39209,Mount Adams,1,555,167249,272137,104888
+39207,Wapato,1,2493,190346,274990,84644
+36101,Dixie,1.04,233,164867,277365,112498
+21232,Winlock,1,1646,271130,277707,6577
+24122,Pateros,1,760,242302,278534,36232
+21036,Evaline,1,321,287072,279076,-7996
+08401,Castle Rock,1,4402,262620,282581,19961
+39200,Grandview,1,3612,229679,282680.5,53001.5
+11056,Kahlotus,1,102,56271,282979,226708
+13144,Quincy,1,4408,244890,283112,38222
+21014,Napavine,1,1525,301507,283302,-18205
+39201,Sunnyside,1,5493,218062,283661.5,65599.5
+13160,Royal,1,1507,110342,283908,173566
+36250,College Place,1,3773,312494,284087.5,-28406.5
+32416,Riverside,1,4294,302269,284383,-17886
+32325,Nine Mile Falls,1.04,3524,345425.5,284596,-60829.5
+32360,Cheney,1,10053,288747,286086,-2661
+22009,Reardan-Edwall,1,1220,270111,286129,16018
+39205,Zillah,1,1532,298562,286260.5,-12301.5
+13073,Wahluke,1,2048,209814.5,286565,76750.5
+32354,Mead,1.04,17166,374317,286831,-87486
+32326,Medical Lake,1,2803,278104,287150,9046
+01147,Othello,1,3659,213127,287354,74227
+21237,Toledo,1,1769,298060,287395,-10665
+21301,Pe Ell,1.04,780,178545,287965.5,109420.5
+08122,Longview,1,14490,276599.5,287992,11392.5
+32312,Great Northern,1,301,337247,288747,-48500
+32361,East Valley (Spokane),1.04,8195,294494,289066,-5428
+39090,East Valley (Yakima),1,5906,334091,289089,-45002
+32362,Liberty,1,1563,298538,289172,-9366
+32081,Spokane,1,70230,253518,289407,35889
+32358,Freeman,1.04,1508,399360.5,289688.5,-109672
+32123,Orchard Prairie,1,238,432439,290343,-142096
+32363,West Valley (Spokane),1,7043,269376,290343,20967
+11051,North Franklin,1,1641,145801,290424.5,144623.5
+39119,Selah,1,6458,363098,290478,-72620
+32356,Central Valley,1.04,26454,332809,291195,-41614
+14066,Montesano,1.04,2992,269422,291273,21851
+36402,Prescott,1,154,127927,291489,163562
+21234,Boistfort,1,317,269622,291701.5,22079.5
+39208,West Valley (Yakima),1,11182,379877,292109,-87768
+39002,Union Gap,1,1099,140484,292244,151760
+39007,Yakima,1,17883,239801,292244,52443
+03400,Richland,1,24339,333748,292474.5,-41273.5
+21226,Adna,1.04,1360,384558,292644,-91914
+26056,Newport,1,4297,215212,293962,78750
+11054,Star,1,12,165117.5,294065,128947.5
+11001,Pasco,1,21925,314894,294556.5,-20337.5
+36300,Touchet,1,241,211974,295521,83547
+03116,Prosser,1,3604,221693.5,295572,73878.5
+36140,Walla Walla,1,10849,284712,295857,11145
+03052,Kiona-Benton City,1.04,3175,221401,296417,75016
+30031,Mill A,1,188,272985,296906,23921
+03050,Paterson,1,79,61354,298992,237638
+03017,Kennewick,1,27697,291854,300655,8801
+03053,Finley,1,1774,213713,300655,86942
+39203,Highland,1,1745,251485,301470,49985
+36400,Columbia (Walla Walla),1,1383,253745,302352,48607
+05121,Port Angeles,1.04,12176,281299,302993,21694
+05313,Crescent,1,1053,290550,302993,12443
+33049,Wellpinit,1,47,62120,304498,242378
+33183,Loon Lake,1,1665,221387,305380,83993
+21206,Mossyrock,1,1948,247270,305813,58543
+22207,Davenport,1,875,143774,307691,163917
+19403,Kittitas,1,1210,299231.5,309690,10458.5
+14400,Oakville,1,775,217338,314882,97544
+14104,Satsop,1,212,204761,317775,113014
+09102,Palisades,1,35,109061,318415,209354
+23311,Mary M. Knight,1,766,223168.5,319186,96017.5
+09209,Waterville,1,794,150849.5,326887,176037.5
+39003,Naches Valley,1,3861,268332,327505,59173
+14068,Elma,1,3330,232822.5,333729,100906.5
+21303,White Pass,1,3399,193679,337258.5,143579.5
+08130,Toutle Lake,1,1751,341306,339272,-2034
+09206,Eastmont,1,10525,359210,342740,-16470
+04019,Manson,1,1891,499604,344528,-155076
+19401,Ellensburg,1,7384,343805.5,344824,1018.5
+19007,Damman,1.04,264,555476.5,346590,-208886.5
+14065,McCleary,1,1265,269419,347574,78155
+34401,Rochester,1,5093,296503,348272,51769
+04129,Lake Chelan,1,6260,358114,348924,-9190
+21214,Morton,1,1411,200897,355166.5,154269.5
+04127,Entiat,1.04,1117,278425,355587,77162
+04246,Wenatchee,1,13187,359902,355594,-4308
+04069,Stehekin,1,129,279685,355985,76300
+21300,Onalaska,1,2010,267144,357439,90295
+21302,Chehalis,1.04,4652,300591,358928,58337
+08458,Kelso,1,9806,280327.5,361268,80940.5
+21401,Centralia,1,6693,254972,363609,108637
+04222,Cashmere,1.04,2287,357049,363718,6669
+09013,Orondo,1,856,417305.5,364865,-52440.5
+34402,Tenino,1,4014,321519.5,381808,60288.5
+34033,Tumwater,1,14182,391141,382758,-8383
+08402,Kalama,1,3106,356757,383063.5,26306.5
+23309,Shelton,1,7853,268073,386583,118510
+04228,Cascade,1,6720,447942.5,386924,-61018.5
+30303,Stevenson-Carson,1,2850,283518,388123,104605
+16046,Brinnon,1,1270,163633,389159,225526
+34307,Rainier,1,2200,343117,389885,46768
+34324,Griffin,1,3091,486105,390165,-95940
+34003,North Thurston,1,34805,374970,391033,16063
+34111,Olympia,1.04,20769,421204,391906,-29298
+27404,Eatonville,1,5239,351801,394949,43148
+23042,Southside,1,934,345275,396800,51525
+08404,Woodland,1,4858,347346,396923,49577
+23404,Hood Canal,1,5498,209539,398243,188704
+16048,Quilcene,1.06,1124,249319,398266,148947
+34002,Yelm,1.06,12238,336225,401481,65256
+23402,Pioneer,1.06,6366,301605.5,401994,100388.5
+30002,Skamania,1.06,413,305274,403810,98536
+06103,Green Mountain,1.06,352,370962.5,406975,36012.5
+06112,Washougal,1.06,7435,430977,407186,-23791
+27001,Steilacoom Historical,1.06,7696,429299,407739,-21560
+23054,Grapeview,1.06,2333,438849,408183,-30666
+19404,Cle Elum-Roslyn,1.06,7373,427345,409470,-17875
+27403,Bethel,1.06,39072,391481,409778,18297
+06119,Battle Ground,1.1,26452,455894,412574.5,-43319.5
+27019,Carbonado,1.06,342,345843.5,413588,67744.5
+19400,Thorp,1.06,747,341680,414672,72992
+37506,Nooksack Valley,1.06,2689,356918,414898,57980
+06101,La Center,1.1,3512,469148,415134,-54014
+06122,Ridgefield,1.06,8007,499661,415134,-84527
+05323,Sequim,1.06,14907,379012,415293,36281
+29011,Concrete,1.06,3353,120586,415362,294776
+27400,Clover Park,1.06,14048,390417,416959,26542
+23403,North Mason  ,1.12,8660,333104,417651,84547
+37507,Mount Baker,1.06,8336,247690.5,419067,171376.5
+27083,University Place,1.1,8062,509616.5,419353,-90263.5
+27344,Orting,1.06,5643,406268,420331,14063
+06098,Hockinson,1.06,3499,583184,420533,-162651
+06037,Vancouver,1.06,42698,402175,421670.5,19495.5
+27402,Franklin Pierce,1.06,14179,365737,421906,56169
+06117,Camas,1.1,10966,554755,422299,-132456
+06114,Evergreen (Clark),1.1,42441,398468,422345,23877
+27416,White River,1.06,8851,436267,422438,-13829
+37501,Bellingham,1.06,30178,485749,423234,-62515
+37502,Ferndale,1.06,10527,434793,423234,-11559
+30029,Mount Pleasant,1.06,140,404671.5,425963.5,21292
+29103,Anacortes,1.16,9887,518679,428884,-89795
+27003,Puyallup,1.12,39737,438288,429884,-8404
+29101,Sedro-Woolley,1.12,9963,356719,430818,74099
+27320,Sumner,1.12,17669,466692,431570,-35122
+16049,Chimacum,1.12,6092,363711,431665.5,67954.5
+29317,Conway,1.16,1054,462834.5,433044.5,-29790
+28137,Orcas Island,1.12,4020,593936.5,433144,-160792.5
+37505,Meridian,1.12,3075,453975,434233,-19742
+37504,Lynden,1.12,6100,435177.5,437378.5,2201
+16050,Port Townsend,1.12,7852,381965,438614,56649
+15201,Oak Harbor,1.12,11606,389842.5,440449,50606.5
+29100,Burlington-Edison,1.12,6879,414815,440616,25801
+29320,Mount Vernon,1.12,11036,387160,440857,53697
+17216,Enumclaw,1.12,9170,427074,441685,14611
+29311,La Conner,1.12,1018,480252,442147,-38105
+27343,Dieringer,1.16,3409,680836,443932,-236904
+28144,Lopez Island,1.12,2392,518883,445178,-73705
+37503,Blaine,1.12,10511,340787,445610,104823
+31330,Darrington,1.12,1545,261759,449400,187641
+27401,Peninsula,1.12,26679,571902,454352,-117550
+27010,Tacoma,1.12,63404,408821,460791,51970
+28149,San Juan Island,1.12,5148,586746,461507,-125239
+19028,Easton,1.12,1446,438163.5,463038,24874.5
+31016,Arlington,1.16,10596,462429,471934,9505
+31306,Lakewood,1.12,4878,449614,474604,24990
+27417,Fife,1.12,5643,448395,482144,33749
+15204,Coupeville,1.12,5877,453119,490489,37370
+17210,Federal Way,1.12,35465,397853,499002,101149
+17408,Auburn,1.12,22311,413588,499002,85414
+17402,Vashon Island,1.16,5073,621505,510241,-111264
+31401,Stanwood-Camano,1.16,16514,492654,515971,23317
+31332,Granite Falls,1.12,6150,393171.5,518034.5,124863
+31025,Marysville,1.18,22514,439094.5,523731,84636.5
+17401,Highline,1.18,33339,440561,524852,84291
+18402,South Kitsap,1.18,26309,401140,531595,130455
+17415,Kent,1.18,44233,449552,533843,84291
+31063,Index,1.18,614,192234,536760,344526
+28010,Shaw Island,1.18,249,601334,542741.5,-58592.5
+17406,Tukwila,1.18,3749,376500,542834,166334
+17409,Tahoma,1.22,13852,519232,548453,29221
+31004,Lake Stevens,1.18,16996,479837,555770,75933
+18401,Central Kitsap,1.22,21248,421950,556320,134370
+17403,Renton,1.18,33447,482144,564187,82043
+17001,Seattle,1.18,171429,705796,569243,-136553
+17404,Skykomish,1.18,603,212413,574302,361889
+18303,Bainbridge Island,1.22,9996,900110,590783,-309327
+17405,Bellevue,1.18,39791,976651,593408,-383243
+18100,Bremerton,1.18,13756,343289.5,595656,252366.5
+18400,North Kitsap,1.22,19552,476965,596780,119815
+17400,Mercer Island,1.18,8008,1499255,600080,-899175
+17411,Issaquah,1.18,35606,831671,606895,-224776
+15206,South Whidbey,1.18,9725,525326,609595,84269
+17414,Lake Washington,1.18,61418,842910,620809,-222101
+17412,Shoreline,1.18,21758,597904,624120,26216
+31015,Edmonds,1.18,52038,604522.5,629887,25364.5
+31006,Mukilteo,1.18,26358,516896,630496,113600
+17410,Snoqualmie Valley,1.18,13563,669832,631620,-38212
+17417,Northshore,1.18,44992,728274,632556,-95718
+17407,Riverview,1.18,7273,638363,634992,-3371
+31002,Everett,1.18,40543,549362,637259.5,87897.5
+31311,Sultan,1.18,5716,352856,639712,286856
+31201,Snohomish,1.22,19406,617658.5,642859,25200.5
+31103,Monroe,1.18,12333,541139,652974,111835
+    `;
+
+    // Parse CSV into a lookup dictionary
+    const factorData = {};
+    const lines = rawCSV.trim().split('\n');
+    for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(',');
+        if (parts.length >= 5) {
+            const district = parts[1].trim().toLowerCase();
+            const factor = parseFloat(parts[2]);
+            const homeValue = parseFloat(parts[4]);
+            factorData[district] = { factor: factor, homeValue: homeValue };
+        }
+    }
+
+    let geojsonLayer;
+    let labelsLayer = L.layerGroup();
+    const ZOOM_THRESHOLD = 10;
+
+    map.on('zoomend', function() {
+        const mapEl = document.getElementById('map');
+        if (map.getZoom() >= ZOOM_THRESHOLD) {
+            if (!map.hasLayer(labelsLayer)) {
+                labelsLayer.addTo(map);
+            }
+            mapEl.classList.add('zoomed-in');
+        } else {
+            if (map.hasLayer(labelsLayer)) {
+                labelsLayer.remove();
+            }
+            mapEl.classList.remove('zoomed-in');
+        }
+    });
+
+    function getBaseFactor(factor) {
+        if (factor >= 1.22) return 1.18;
+        if (factor >= 1.18) return 1.18;
+        if (factor >= 1.16) return 1.12;
+        if (factor >= 1.12) return 1.12;
+        if (factor >= 1.10) return 1.06;
+        if (factor >= 1.06) return 1.06;
+        if (factor >= 1.04) return 1.00;
+        return 1.00;
+    }
+
+    function getColor(baseFactor) {
+        return baseFactor >= 1.18 ? '#006d2c' :
+               baseFactor >= 1.12 ? '#31a354' :
+               baseFactor >= 1.06 ? '#a1d99b' :
+                                    '#edf8e9';
+    }
+
+    function getDistrictName(feature) {
+        const props = feature.properties;
+        let rawName = props.SchoolDist || props.SD_Name || props.NAME || props.Name || props.LEAName || props.JNAME || props.Dist_Name || props.DIST_NAME || props.DistrictName || props.ShortName;
+        
+        if (!rawName) {
+            for (let key in props) {
+                if (typeof props[key] === 'string') {
+                    let val = props[key].toLowerCase();
+                    if (val.includes('school') || val.includes('district') || val.includes('knight') || val.includes('mary m') || key.toLowerCase().includes('name')) {
+                        rawName = props[key];
+                        break;
+                    }
+                }
+                if (String(props[key]) === '23311') {
+                    rawName = 'Mary M. Knight';
+                    break;
+                }
+            }
+        }
+        
+        if (!rawName || rawName === 'Unknown' || rawName.trim() === '') {
+            const propsStr = JSON.stringify(props).toLowerCase();
+            if (propsStr.includes('knight') || propsStr.includes('23311')) {
+                rawName = 'Mary M. Knight';
+            }
+        }
+        
+        if (rawName) {
+            return rawName
+                .replace(/(?:\bschool district\b|\bpublic schools\b|\bs\.d\.\b|\bs\.d\b)/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+        
+        return "Unknown";
+    }
+
+    function getCleanName(feature) {
+        let name = getDistrictName(feature);
+        let clean = name.toLowerCase()
+            .replace(/school district/gi, '')
+            .replace(/public schools/gi, '')
+            .replace(/s\.d\./gi, '')
+            .replace(/s\.d/gi, '')
+            .trim();
+        
+        let props = feature.properties;
+        let fullStr = JSON.stringify(props).toLowerCase();
+        
+        if (clean.includes('evergreen')) {
+            if (fullStr.includes('clark') || fullStr.includes('114')) return 'evergreen (clark)';
+            if (fullStr.includes('stevens') || fullStr.includes('205')) return 'evergreen (stevens)';
+            return 'evergreen (clark)';
+        }
+        
+        if (clean.includes('columbia')) {
+            if (fullStr.includes('walla') || fullStr.includes('400')) return 'columbia (walla walla)';
+            if (fullStr.includes('stevens') || fullStr.includes('206')) return 'columbia (stevens)';
+        }
+        
+        if (clean.includes('mary m') || clean.includes('knight')) {
+            return 'mary m. knight';
+        }
+        
+        return clean;
+    }
+
+    function getDistrictData(feature) {
+        let cleanName = getCleanName(feature);
+        let dataObj = factorData[cleanName];
+
+        if (!dataObj) {
+            for (const [csvName, val] of Object.entries(factorData)) {
+                let csvNoParens = csvName.replace(/\s*\(.*?\)\s*/g, '').trim();
+                if (cleanName === csvNoParens) {
+                    dataObj = val;
+                    break;
+                }
+            }
+        }
+        if (!dataObj) {
+            for (const [csvName, val] of Object.entries(factorData)) {
+                if (cleanName.includes(csvName) || csvName.includes(cleanName)) {
+                    if (Math.abs(cleanName.length - csvName.length) < 8) {
+                        dataObj = val;
+                        break;
+                    }
+                }
+            }
+        }
+        return { dataObj, cleanName };
+    }
+
+    function style(feature) {
+        let { dataObj } = getDistrictData(feature);
+        let factor = dataObj ? dataObj.factor : 1.0;
+        let baseFactor = getBaseFactor(factor);
+        return {
+            fillColor: getColor(baseFactor),
+            weight: 1.5,
+            opacity: 1,
+            color: '#666',
+            dashArray: '3',
+            fillOpacity: 0.6
+        };
+    }
+
+    function onEachFeature(feature, layer) {
+        let name = getDistrictName(feature);
+        let { dataObj, cleanName } = getDistrictData(feature);
+
+        let factor = dataObj ? dataObj.factor : 1.0;
+        let homeValue = dataObj ? dataObj.homeValue : 0;
+        let baseFactor = getBaseFactor(factor);
+
+        let formattedValue = homeValue ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(homeValue) : 'N/A';
+
+        layer.bindTooltip(`<strong>${name}</strong><br/>Base Factor: ${baseFactor.toFixed(2)}<br/>Home Value: ${formattedValue}`, {
+            sticky: true,
+            className: 'custom-tooltip'
+        });
+
+        if (layer.getBounds) {
+            let center = layer.getBounds().getCenter();
+            
+            if (cleanName === 'nooksack valley' || cleanName.includes('nooksack')) {
+                center = L.latLng(48.91, -122.32); 
+            } else if (cleanName === 'mount baker' || cleanName.includes('mount baker')) {
+                center = L.latLng(48.83, -121.95);
+            } else if (cleanName === 'griffin') {
+                center = L.latLng(47.10, -123.05);
+            } else if (cleanName === 'olympia') {
+                center = L.latLng(47.03, -122.95);
+            } else if (cleanName === 'north thurston') {
+                center = L.latLng(47.05, -122.80);
+            } else if (cleanName === 'peninsula') {
+                center = L.latLng(47.34, -122.65);
+            } else if (cleanName === 'south kitsap') {
+                center = L.latLng(47.45, -122.65);
+            }
+
+            const icon = L.divIcon({
+                className: 'district-label',
+                html: `<div>${name}<br>${formattedValue}<br>${baseFactor.toFixed(2)}</div>`
+            });
+            L.marker(center, { icon: icon, interactive: false }).addTo(labelsLayer);
+        }
+    }
+
+    // Legend
+    const legend = L.control({position: 'bottomright'});
+    legend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'info legend');
+        const grades = [1.00, 1.06, 1.12, 1.18];
+        div.innerHTML += '<strong>Base Regionalization</strong><br><small>(Experience Factor grouped)</small><br>';
+        for (let i = 0; i < grades.length; i++) {
+            div.innerHTML +=
+                '<i style="background:' + getColor(grades[i]) + '"></i> ' +
+                grades[i].toFixed(2) + '<br>';
+        }
+        return div;
+    };
+    legend.addTo(map);
+
+    // ── AUTO-LOAD GeoJSON from the same directory ──────────────────────────────
+    function loadGeoJSON(geojsonData) {
+        if (geojsonLayer) {
+            map.removeLayer(geojsonLayer);
+        }
+        labelsLayer.clearLayers();
+
+        geojsonLayer = L.geoJSON(geojsonData, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map);
+
+        map.fitBounds(geojsonLayer.getBounds());
+
+        const mapEl = document.getElementById('map');
+        if (map.getZoom() >= ZOOM_THRESHOLD) {
+            labelsLayer.addTo(map);
+            mapEl.classList.add('zoomed-in');
+        } else {
+            mapEl.classList.remove('zoomed-in');
+        }
+
+        const statusMsg = document.getElementById('status-msg');
+        statusMsg.textContent = 'Map loaded successfully.';
+        statusMsg.className = 'success';
+    }
+
+    fetch('Washington_School_Districts.geojson')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} — file not found or not served`);
+            }
+            return response.json();
+        })
+        .then(geojsonData => {
+            loadGeoJSON(geojsonData);
+        })
+        .catch(err => {
+            const statusMsg = document.getElementById('status-msg');
+            statusMsg.innerHTML = `<strong>Could not load GeoJSON.</strong><br>
+                Make sure <code>Washington_School_Districts.geojson</code> is in the same folder as this HTML file
+                and that you are serving both files via a local web server (e.g. <code>python -m http.server</code>),
+                not opening the HTML directly as a <code>file://</code> URL.<br><br>
+                <em>Error: ${err.message}</em>`;
+            statusMsg.className = 'error';
+            console.error('GeoJSON fetch error:', err);
+        });
+
+    // UI Minimization Toggle
+    document.getElementById('minimize-btn').addEventListener('click', function() {
+        const uiContainer = document.getElementById('ui-container');
+        uiContainer.classList.toggle('minimized');
+        this.textContent = uiContainer.classList.contains('minimized') ? '+' : '−';
+    });
+
+    // Quick Zoom Functions
+    function zoomTo(region) {
+        if (region === 'whatcom') {
+            map.flyTo([48.70, -122.25], 10);
+        } else if (region === 'kitsap') {
+            map.flyTo([47.41, -122.65], 11);
+        } else if (region === 'clark') {
+            map.flyTo([45.75, -122.50], 10);
+        }
+    }
+</script>
+</body>
+</html>
